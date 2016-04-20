@@ -7,6 +7,10 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/kalokng/fetch"
+
+	_ "net/http/pprof"
+
 	"golang.org/x/net/websocket"
 )
 
@@ -21,12 +25,13 @@ func EchoServer(w http.ResponseWriter, r *http.Request) {
 	echoWs.ServeHTTP(w, r)
 }
 
-func WebServer(ws *websocket.Conn) {
-	os.Stdout.Write([]byte("Start WEB"))
-	defer os.Stdout.Write([]byte("End WEB"))
-	w := io.MultiWriter(ws, os.Stdout)
-
-	resp, err := http.Get("http://httpbin.org/ip")
+func WebServer(w http.ResponseWriter, r *http.Request) {
+	val := r.URL.Query()
+	q := val.Get("q")
+	if q == "" {
+		q = "http://httpbin.org/ip"
+	}
+	resp, err := http.Get(q)
 	if err != nil {
 		fmt.Fprintln(w, err)
 		return
@@ -61,13 +66,16 @@ func serveCONNECT(ws *websocket.Conn, req *http.Request) {
 		io.WriteString(ws, "HTTP/1.1 500 Internal Server Error\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n500 Internal Server Error: "+err.Error())
 		return
 	}
-	c.Write([]byte("HTTP/1.0 200 OK\r\n\r\n"))
 	fmt.Println("start tunnel...")
 	go func() {
-		io.Copy(ws, c)
+		ew := fetch.NewEncoder(ws)
+		ew.Write([]byte("HTTP/1.1 200 OK\r\n\r\n"))
+		io.Copy(ew, c)
+		//ew.Close()
 		ws.Close()
 	}()
-	io.Copy(c, ws)
+	er := fetch.NewDecoder(ws)
+	io.Copy(c, er)
 	c.Close()
 }
 
@@ -93,6 +101,7 @@ var wsProxy = websocket.Handler(func(ws *websocket.Conn) {
 
 func main() {
 	http.HandleFunc("/echo", EchoServer)
+	http.HandleFunc("/web", WebServer)
 	http.Handle("/proxy", wsProxy)
 	//proxy := NewProxyListener(nil)
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -102,6 +111,7 @@ func main() {
 
 	bind := getIP() + ":" + getPort()
 
+	fmt.Println("Listening to", bind)
 	err := http.ListenAndServe(bind, nil)
 	if err != nil {
 		panic(err)
