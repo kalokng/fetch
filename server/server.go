@@ -99,7 +99,10 @@ func main() {
 		fmt.Println("Hello world")
 		fmt.Fprintf(w, "Hello world!")
 	})
-	err := http.ListenAndServe(":12345", nil)
+
+	bind := getIP() + ":" + getPort()
+
+	err := http.ListenAndServe(bind, nil)
 	if err != nil {
 		panic(err)
 	}
