@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"net"
 	"sync"
 )
@@ -13,6 +14,7 @@ type ConnPool struct {
 }
 
 func (p *ConnPool) Get() (net.Conn, error) {
+	fmt.Println("  >> GET")
 	v := p.pool.Get()
 	conn, ok := v.(net.Conn)
 	if conn == nil || !ok {
@@ -25,7 +27,9 @@ func (p *ConnPool) Get() (net.Conn, error) {
 }
 
 func (p *ConnPool) Put(conn net.Conn) {
-	p.pool.Put(conn)
+	fmt.Println("<<   Put")
+	conn.Close()
+	//p.pool.Put(conn)
 }
 
 func NewConnPool(newConn func() (net.Conn, error)) *ConnPool {

@@ -4,6 +4,9 @@ import (
 	"fmt"
 	"net"
 
+	"net/http"
+	_ "net/http/pprof"
+
 	"golang.org/x/net/websocket"
 )
 
@@ -13,9 +16,9 @@ func Connect(url, origin string) (net.Conn, error) {
 
 func main() {
 	origin := "http://localhost/"
-	url := "ws://localhost:12345/web"
+	url := "ws://localhost:12345/proxy"
 	pool := NewConnPool(func() (net.Conn, error) {
-		fmt.Println("New connection")
+		fmt.Println("     New connection")
 		conn, err := Connect(url, origin)
 		if err != nil {
 			return nil, err
@@ -23,7 +26,10 @@ func main() {
 		return conn, nil
 	})
 
-	err := Tunnel(":8282", pool)
+	host := ":8282"
+	fmt.Println("Start listening", host)
+	//http.Handle("/", Tunnel(pool))
+	err := http.ListenAndServe(host, Tunnel(pool))
 	if err != nil {
 		panic(err)
 	}
