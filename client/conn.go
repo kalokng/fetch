@@ -28,7 +28,7 @@ func logConnect(w io.Writer, fn funcConn) funcConn {
 	}
 }
 
-func HttpConnect(proxy, url_ string) (io.ReadWriteCloser, error) {
+func HttpConnect(proxy, url_ string) (net.Conn, error) {
 	p, err := net.Dial("tcp", proxy)
 	if err != nil {
 		return nil, err
@@ -81,4 +81,41 @@ func ProxyDial(url_, protocol, origin string) (ws *websocket.Conn, err error) {
 	}
 
 	return websocket.NewClient(config, client)
+}
+
+func ProxyHTTP(url_ string) (c net.Conn, err error) {
+	if os.Getenv("HTTP_PROXY") == "" {
+		fmt.Println("url_", url_)
+		turl, err := url.Parse(url_)
+		if err != nil {
+			return nil, err
+		}
+		fmt.Println("turl", turl)
+
+		fmt.Println("turl.Host", turl.Host)
+		p, err := net.Dial("tcp", turl.Host)
+
+		req := http.Request{
+			Method: "CONNECT",
+			URL:    turl,
+			Host:   turl.Host,
+		}
+
+		cc := httputil.NewClientConn(p, nil)
+		cc.Do(&req)
+		if err != nil && err != httputil.ErrPersistEOF {
+			return nil, err
+		}
+
+		rwc, _ := cc.Hijack()
+
+		return rwc, nil
+	}
+
+	purl, err := url.Parse(os.Getenv("HTTP_PROXY"))
+	if err != nil {
+		return nil, err
+	}
+
+	return HttpConnect(purl.Host, url_)
 }
