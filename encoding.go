@@ -65,7 +65,7 @@ func (d *decoder) Read(p []byte) (n int, err error) {
 		var nn int
 		if d.nbuf > 0 {
 			j := 0
-			for j < d.nbuf {
+			for j < d.nbuf && n < len(p) {
 				r, size := utf8.DecodeRune(d.buf[j:d.nbuf])
 				//fmt.Println(d.nbuf, j, n, r, size)
 				if r == utf8.RuneError && size <= 1 {
@@ -79,13 +79,15 @@ func (d *decoder) Read(p []byte) (n int, err error) {
 				n++
 				j += size
 			}
-			if d.nbuf < bufsize {
+			if j > 0 {
+				oldn := d.nbuf
+				copy(d.buf[:], d.buf[j:d.nbuf])
 				d.nbuf -= j
-				return
+				//fmt.Println("copy", d.nbuf, j)
+				if oldn < bufsize || n == len(p) {
+					return
+				}
 			}
-			copy(d.buf[:], d.buf[j:d.nbuf])
-			d.nbuf -= j
-			//fmt.Println("copy", d.nbuf, j)
 		}
 
 		//fmt.Println("err", err)
@@ -94,7 +96,7 @@ func (d *decoder) Read(p []byte) (n int, err error) {
 		}
 
 		nn, err = d.r.Read(d.buf[d.nbuf:])
-		//fmt.Println(nn, err)
+		//fmt.Println(nn, err, d.buf[d.nbuf:nn])
 		d.nbuf += nn
 	}
 	return

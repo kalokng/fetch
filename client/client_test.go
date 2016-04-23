@@ -7,6 +7,8 @@ import (
 	"os"
 	"testing"
 	"time"
+
+	"github.com/kalokng/fetch"
 )
 
 func TestWeb(t *testing.T) {
@@ -19,7 +21,7 @@ func TestWeb(t *testing.T) {
 
 func TestWsecho(t *testing.T) {
 	var n int
-	url := "ws://toy2-fands.rhcloud.com:8000/echo"
+	url := "ws://toy-fands.rhcloud.com:8000/echo"
 	conn, err := ProxyDial(url, "", url)
 	if err != nil {
 		panic(err)
@@ -31,18 +33,18 @@ func TestWsecho(t *testing.T) {
 	}
 	b = append(b, []byte("世界")...)
 
-	de := make([]byte, 1024)
-	n = hex.Encode(de, b)
+	ew := fetch.NewEncoder(conn)
 
 	go func() {
-		n, err := conn.Write(de[:n])
+		n, err := ew.Write(b)
 		fmt.Println(n, err)
 	}()
 
 	time.Sleep(1e9)
 
 	msg := make([]byte, 1024)
-	n, err = conn.Read(msg)
+	er := fetch.NewDecoder(conn)
+	n, err = er.Read(msg)
 	if err != nil {
 		panic(err)
 	}

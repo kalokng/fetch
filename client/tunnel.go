@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httputil"
 
 	"github.com/kalokng/fetch"
 )
@@ -15,7 +16,13 @@ func Tunnel(pool *ConnPool) http.Handler {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		fmt.Println("Received", r.Host, r.URL.Path)
+
+		{
+			if b, err := httputil.DumpRequest(r, false); err == nil {
+				fmt.Printf("%s\n", b)
+			}
+		}
+
 		//fmt.Fprintln(conn, "Received", r.URL.Path)
 		hj, ok := w.(http.Hijacker)
 		if !ok {
@@ -28,7 +35,6 @@ func Tunnel(pool *ConnPool) http.Handler {
 
 		//mw := io.MultiWriter(conn, os.Stdout)
 		// send out the request
-		fmt.Println(r.Method, r.URL.String())
 		if r.Method == "CONNECT" {
 			go func() {
 				ew := fetch.NewEncoder(conn)
@@ -36,12 +42,12 @@ func Tunnel(pool *ConnPool) http.Handler {
 				//io.Copy(ew, io.TeeReader(c, os.Stdout))
 				io.Copy(ew, c)
 				//ew.Close()
+				pool.Put(conn)
 			}()
 			er := fetch.NewDecoder(conn)
 			//io.Copy(io.MultiWriter(c, os.Stdout), er)
 			io.Copy(c, er)
 			c.Close()
-			pool.Put(conn)
 			return
 		}
 

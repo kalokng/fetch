@@ -22,11 +22,11 @@ func main() {
 	}
 	fmt.Printf("Connect to %s:%s\n", host, port)
 
-	//origin := "http://" + host + "/"
-	url := "http://" + host + ":" + port + "/proxy2"
+	origin := "https://" + host + "/"
+	url := "wss://" + host + ":" + port + "/proxy"
 
 	genConn := func() (net.Conn, error) {
-		conn, err := ProxyHTTP(url)
+		conn, err := ProxyDial(url, "", origin)
 		if err != nil {
 			return nil, err
 		}
