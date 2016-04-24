@@ -7,6 +7,18 @@ import (
 
 const bufsize = 1024
 
+func bytesize(r rune) int {
+	switch i := uint32(r); {
+	case i <= 0xff:
+		return 1
+	case i <= 0xffff:
+		return 2
+	case i <= 0xffffff:
+		return 3
+	}
+	return 4
+}
+
 type encoder struct {
 	w   io.Writer
 	out [bufsize]byte
@@ -17,7 +29,8 @@ func NewEncoder(w io.Writer) io.Writer { return &encoder{w: w} }
 
 func (e *encoder) Write(p []byte) (n int, err error) {
 	i := 0
-	for _, v := range p {
+	for j := 0; j < len(p); j++ {
+		v := p[j]
 		if v < utf8.RuneSelf {
 			e.out[i] = v
 			i++
@@ -28,7 +41,14 @@ func (e *encoder) Write(p []byte) (n int, err error) {
 				i = 0
 			}
 		} else {
-			l := utf8.EncodeRune(e.r[:], rune(v))
+			v := rune(p[j])
+			if (v&0xF8 != 0xD8) && j+1 < len(p) {
+				v = (v << 8) | rune(p[j+1])
+				j++
+				n++
+			}
+			l := utf8.EncodeRune(e.r[:], v)
+			//fmt.Printf("%x % x\n", v, e.r[:l])
 			if i+l >= bufsize {
 				if _, err := e.w.Write(e.out[:i]); err != nil {
 					return n, err
@@ -52,6 +72,8 @@ type decoder struct {
 	r    io.Reader
 	buf  [bufsize]byte
 	nbuf int
+	rm   [utf8.UTFMax]byte
+	nrm  int
 }
 
 func NewDecoder(r io.Reader) io.Reader { return &decoder{r: r} }
@@ -59,6 +81,15 @@ func NewDecoder(r io.Reader) io.Reader { return &decoder{r: r} }
 func (d *decoder) Read(p []byte) (n int, err error) {
 	if len(p) == 0 {
 		return 0, nil
+	}
+
+	if d.nrm > 0 {
+		//fmt.Printf("!!! %d %x\n", d.nrm, d.rm[:d.nrm])
+		n = copy(p, d.rm[:d.nrm])
+		d.nrm -= n
+		if n == len(p) {
+			return
+		}
 	}
 
 	for {
@@ -72,14 +103,29 @@ func (d *decoder) Read(p []byte) (n int, err error) {
 					// seems buffer missed sth
 					break
 				}
-				if r > 256 {
-					panic("r > 256")
+				if r < 256 {
+					p[n] = byte(r)
+					n++
+				} else {
+					if r < 0x8000 {
+						panic("invalid encoding")
+					}
+					bs := bytesize(r)
+					for i := bs - 1; i >= 0; i-- {
+						d.rm[i] = byte(r & 0xff)
+						r >>= 8
+					}
+					cn := copy(p[n:], d.rm[:bs])
+					n += cn
+					if cn < bs {
+						copy(d.rm[:], d.rm[cn:bs])
+						d.nrm = bs - cn
+					}
 				}
-				p[n] = byte(r)
-				n++
 				j += size
 			}
 			if j > 0 {
+				//fmt.Printf("j:%d, nbuf:%d n:%d, len(p):%d\n", j, d.nbuf, n, len(p))
 				oldn := d.nbuf
 				copy(d.buf[:], d.buf[j:d.nbuf])
 				d.nbuf -= j
