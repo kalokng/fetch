@@ -6,6 +6,8 @@ import (
 	"os"
 	"strings"
 
+	"github.com/kalokng/fetch"
+
 	"net/http"
 	_ "net/http/pprof"
 )
@@ -13,24 +15,41 @@ import (
 func main() {
 	host := "localhost"
 	port := "8000"
+	proto := "https"
 	if len(os.Args) >= 2 {
-		l := strings.Split(os.Args[1], ":")
+		sch := strings.SplitN(os.Args[1], "://", 2)
+		if len(sch) > 1 {
+			proto = sch[0]
+		}
+		addr := sch[len(sch)-1]
+		l := strings.Split(addr, ":")
 		host = l[0]
 		if len(l) > 1 {
 			port = l[1]
 		}
 	}
-	fmt.Printf("Connect to %s:%s\n", host, port)
 
-	origin := "https://" + host + "/"
-	url := "wss://" + host + ":" + port + "/proxy"
+	var origin, url string
+	switch proto {
+	case "http":
+		origin = "http://" + host + "/"
+		url = "ws://" + host + ":" + port + "/proxy"
+	case "https":
+		origin = "https://" + host + "/"
+		url = "wss://" + host + ":" + port + "/proxy"
+	default:
+		fmt.Println("Unknown protocol")
+		return
+	}
+
+	fmt.Printf("Connect to %s:%s\n", host, port)
 
 	genConn := func() (net.Conn, error) {
 		conn, err := ProxyDial(url, "", origin)
 		if err != nil {
 			return nil, err
 		}
-		return conn, nil
+		return fetch.NewUtf8Conn(conn), nil
 	}
 	genConn = logConnect(os.Stdout, genConn)
 

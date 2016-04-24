@@ -5,8 +5,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httputil"
-
-	"github.com/kalokng/fetch"
 )
 
 func Tunnel(pool *ConnPool) http.Handler {
@@ -37,16 +35,13 @@ func Tunnel(pool *ConnPool) http.Handler {
 		// send out the request
 		if r.Method == "CONNECT" {
 			go func() {
-				ew := fetch.NewEncoder(conn)
-				r.Write(ew)
-				//io.Copy(ew, io.TeeReader(c, os.Stdout))
-				io.Copy(ew, c)
-				//ew.Close()
+				r.Write(conn)
+				//io.Copy(conn, io.TeeReader(c, os.Stdout))
+				io.Copy(conn, c)
 				pool.Put(conn)
 			}()
-			er := fetch.NewDecoder(conn)
-			//io.Copy(io.MultiWriter(c, os.Stdout), er)
-			io.Copy(c, er)
+			//io.Copy(io.MultiWriter(c, os.Stdout), conn)
+			io.Copy(c, conn)
 			c.Close()
 			return
 		}
