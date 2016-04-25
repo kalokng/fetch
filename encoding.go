@@ -5,7 +5,10 @@ import (
 	"unicode/utf8"
 )
 
-const bufsize = 1024
+const (
+	mask    = 0x55
+	bufsize = 1024
+)
 
 func bytesize(r rune) int {
 	switch i := uint32(r); {
@@ -32,7 +35,7 @@ func (e *encoder) Write(p []byte) (n int, err error) {
 	for j := 0; j < len(p); j++ {
 		v := p[j]
 		if v < utf8.RuneSelf {
-			e.out[i] = v
+			e.out[i] = v ^ mask
 			i++
 			if i >= bufsize {
 				if _, err := e.w.Write(e.out[:i]); err != nil {
@@ -103,11 +106,15 @@ func (d *decoder) Read(p []byte) (n int, err error) {
 					// seems buffer missed sth
 					break
 				}
-				if r < 256 {
+				switch i := uint32(r); {
+				case i < 128:
+					p[n] = byte(r ^ mask)
+					n++
+				case i < 256:
 					p[n] = byte(r)
 					n++
-				} else {
-					if r < 0x8000 {
+				default:
+					if i < 0x8000 {
 						panic("invalid encoding")
 					}
 					bs := bytesize(r)

@@ -33,10 +33,10 @@ func main() {
 	switch proto {
 	case "http":
 		origin = "http://" + host + "/"
-		url = "ws://" + host + ":" + port + "/proxy"
+		url = "ws://" + host + ":" + port + "/p"
 	case "https":
 		origin = "https://" + host + "/"
-		url = "wss://" + host + ":" + port + "/proxy"
+		url = "wss://" + host + ":" + port + "/p"
 	default:
 		fmt.Println("Unknown protocol")
 		return
