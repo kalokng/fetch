@@ -1,10 +1,8 @@
 package main
 
 import (
-	"fmt"
 	"io"
 	"net/http"
-	"net/http/httputil"
 )
 
 func Tunnel(pool *ConnPool) http.Handler {
@@ -15,11 +13,11 @@ func Tunnel(pool *ConnPool) http.Handler {
 			return
 		}
 
-		{
-			if b, err := httputil.DumpRequest(r, false); err == nil {
-				fmt.Printf("%s\n", b)
-			}
-		}
+		//{
+		//	if b, err := httputil.DumpRequest(r, false); err == nil {
+		//		fmt.Printf("%s\n", b)
+		//	}
+		//}
 
 		//fmt.Fprintln(conn, "Received", r.URL.Path)
 		hj, ok := w.(http.Hijacker)
