@@ -2,12 +2,11 @@ package main
 
 import (
 	"fmt"
-	"io"
+	"log"
 	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
-	"os"
 
 	"golang.org/x/net/websocket"
 )
@@ -18,11 +17,11 @@ func Connect(url, origin string) (net.Conn, error) {
 	return websocket.Dial(url, "", origin)
 }
 
-func logConnect(w io.Writer, fn funcConn) funcConn {
+func logConnect(fn funcConn) funcConn {
 	return func() (net.Conn, error) {
 		conn, err := fn()
 		if err != nil {
-			fmt.Fprintf(w, "connect err: %s\n", err.Error())
+			log.Printf("connect err: %s\n", err.Error())
 		}
 		return conn, err
 	}
@@ -57,11 +56,11 @@ func HttpConnect(proxy, url_ string) (net.Conn, error) {
 }
 
 func ProxyDial(url_, protocol, origin string) (ws *websocket.Conn, err error) {
-	if os.Getenv("HTTP_PROXY") == "" {
+	if proxyUrl == "" {
 		return websocket.Dial(url_, protocol, origin)
 	}
 
-	purl, err := url.Parse(os.Getenv("HTTP_PROXY"))
+	purl, err := url.Parse(proxyUrl)
 	if err != nil {
 		return nil, err
 	}
@@ -84,7 +83,7 @@ func ProxyDial(url_, protocol, origin string) (ws *websocket.Conn, err error) {
 }
 
 func ProxyHTTP(url_ string) (c net.Conn, err error) {
-	if os.Getenv("HTTP_PROXY") == "" {
+	if proxyUrl == "" {
 		fmt.Println("url_", url_)
 		turl, err := url.Parse(url_)
 		if err != nil {
@@ -112,7 +111,7 @@ func ProxyHTTP(url_ string) (c net.Conn, err error) {
 		return rwc, nil
 	}
 
-	purl, err := url.Parse(os.Getenv("HTTP_PROXY"))
+	purl, err := url.Parse(proxyUrl)
 	if err != nil {
 		return nil, err
 	}

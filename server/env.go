@@ -9,7 +9,7 @@ func getIP() string {
 func getPort() string {
 	s := os.Getenv("OPENSHIFT_GO_PORT")
 	if s == "" {
-		return "8080"
+		return "8000"
 	}
 	return s
 }

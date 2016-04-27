@@ -11,7 +11,7 @@ func testmask(t *testing.T, dt dataType, size int, min, max byte) {
 	name, method := method(dt)
 	b := method(size, min, max)
 
-	var m byte = 0x55
+	var m byte = 0x56
 
 	r1, w1 := io.Pipe()
 	r2, w2 := io.Pipe()
@@ -31,7 +31,6 @@ func testmask(t *testing.T, dt dataType, size int, min, max byte) {
 	w2.Close()
 	<-c
 
-	fmt.Printf("% X\n", msg.Bytes())
 	if !equal(t, b, buf.Bytes(), name, size) {
 		c := msg.Bytes()
 		d := buf.Bytes()
