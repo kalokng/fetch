@@ -6,9 +6,9 @@ import (
 	"net/http"
 )
 
-func LogHandler(h http.Handler) http.Handler {
+func LogHandler(prefix string, h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		go log.Printf("<-- %s: %s", r.Method, r.URL.Host)
+		go log.Printf("%s %s: %s", prefix, r.Method, r.URL.Host)
 		h.ServeHTTP(w, r)
 	})
 }

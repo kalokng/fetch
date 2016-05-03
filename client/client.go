@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/tls"
+	"errors"
 	"flag"
 	"fmt"
 	"net"
@@ -13,6 +15,7 @@ import (
 
 	"net/http"
 	_ "net/http/pprof"
+	"net/url"
 )
 
 var proxyUrl string
@@ -29,8 +32,8 @@ func getRemoteProxy() string {
 
 func init() {
 	flag.StringVar(&localPort, "port", "8282", "the port this server going to listen")
-	flag.StringVar(&hostUrl, "host", getRemoteProxy(), "Address of Remote server,\ndefault is $REMOTE_PROXY if set")
-	flag.StringVar(&proxyUrl, "proxy", os.Getenv("HTTP_PROXY"), "Address of HTTP proxy server, empty if no proxy.\nDefault is $HTTP_PROXY if set")
+	flag.StringVar(&hostUrl, "host", getRemoteProxy(), "Address of Remote server, $REMOTE_PROXY if set")
+	flag.StringVar(&proxyUrl, "proxy", os.Getenv("HTTP_PROXY"), "Address of HTTP proxy server, $HTTP_PROXY if set")
 }
 
 func main() {
@@ -50,14 +53,14 @@ func main() {
 		port = l[1]
 	}
 
-	var origin, url string
+	var origin, pUrl string
 	switch proto {
 	case "http":
 		origin = "http://" + host + "/"
-		url = "ws://" + host + ":" + port + "/p"
+		pUrl = "ws://" + host + ":" + port + "/p"
 	case "https":
 		origin = "https://" + host + "/"
-		url = "wss://" + host + ":" + port + "/p"
+		pUrl = "wss://" + host + ":" + port + "/p"
 	default:
 		fmt.Println("Unknown protocol")
 		return
@@ -70,8 +73,105 @@ func main() {
 		fmt.Printf("Wtih http proxy %s\n", proxyUrl)
 	}
 
+	// handler to ask local proxy
+	proxy := createProxy()
+	proxyHandler := LogHandler("proxy  <--", proxy)
+
+	// handler to ask remote proxy
+	remoteProxy := LogHandler("remote <--", createRemoteProxy(proxy, pUrl, "", origin))
+
+	// cache handler
+	hmap := map[string]http.Handler{
+		"proxy":  proxyHandler,
+		"remote": remoteProxy,
+	}
+	f, err := os.OpenFile("data.txt", os.O_RDWR|os.O_CREATE, 0666)
+	if err != nil {
+		panic(err)
+	}
+	cache := NewCacheHandler(nil, hmap, f)
+	cache.SaveW = f
+
+	// default handler
+	defProxy := createProxy()
+	defProxy.Fallback = remoteProxy
+	defProxy.ValidHTTP = func(req *http.Request, resp *http.Response) error {
+		err := validHTTP(req, resp)
+		if err == nil {
+			//go cache.Set(req.Host, "", proxyHandler)
+		} else {
+			go cache.Set(req.Host, "remote", remoteProxy)
+		}
+		return err
+	}
+	defProxy.ValidConnect = func(req *http.Request, c net.Conn) error {
+		err := handshakeConnect(req.URL, c)
+		if err == nil {
+			go cache.Set(req.Host, "", proxyHandler)
+		} else {
+			go cache.Set(req.Host, "remote", remoteProxy)
+		}
+		return err
+	}
+	cache.Default = LogHandler("       <--", defProxy)
+
+	fmt.Println("Start listening", ":"+localPort)
+	err = http.ListenAndServe(":"+localPort, cache)
+
+	//err = http.ListenAndServe(":"+localPort, LogHandler(proxy))
+	if err != nil {
+		panic(err)
+	}
+}
+
+func createFallback(name string, h http.Handler, cache *CacheHandler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		go cache.Set(r.Host, name, h)
+		h.ServeHTTP(w, r)
+	})
+}
+
+func createProxy() *NTLMProxy {
+	proxy, _ := NewNTLMProxy(proxyUrl)
+	return proxy
+}
+
+var notFound = errors.New("Not found")
+var filtered = errors.New("Filtered")
+
+func validHTTP(req *http.Request, resp *http.Response) error {
+	switch {
+	case resp.StatusCode >= 400:
+		return notFound
+	case resp.StatusCode >= 300 && resp.StatusCode != http.StatusNotModified:
+		l := resp.Header.Get("Location")
+		u, err := url.Parse(l)
+		if err != nil {
+			return err
+		}
+		if u.Host == "alert.scansafe.net" {
+			return filtered
+		}
+	}
+	return nil
+}
+
+func hasPort(s string) bool { return strings.LastIndex(s, ":") > strings.LastIndex(s, "]") }
+
+func handshakeConnect(u *url.URL, c net.Conn) error {
+	h := u.Host
+	if hasPort(h) {
+		h = h[:strings.LastIndex(h, ":")]
+	}
+	cfg := &tls.Config{ServerName: h}
+	tlsConn := tls.Client(c, cfg)
+	return tlsConn.Handshake()
+}
+
+func createRemoteProxy(proxy *NTLMProxy, pUrl, protocol, origin string) http.Handler {
 	genConn := func() (net.Conn, error) {
-		conn, err := ProxyDial(url, "", origin)
+		//conn, err := ProxyDial(pUrl, "", origin)
+		conn, err := proxy.Websocket(pUrl, "", origin)
 		if err != nil {
 			return nil, err
 		}
@@ -79,13 +179,5 @@ func main() {
 		return fetch.NewClientConn(conn, 0x56), nil
 	}
 	genConn = logConnect(genConn)
-
-	pool := NewConnPool(genConn)
-
-	fmt.Println("Start listening", ":"+localPort)
-	//http.Handle("/", Tunnel(pool))
-	err := http.ListenAndServe(":"+localPort, LogHandler(Tunnel(pool)))
-	if err != nil {
-		panic(err)
-	}
+	return Tunnel(NewConnPool(genConn))
 }
