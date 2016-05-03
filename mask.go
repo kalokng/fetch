@@ -32,20 +32,22 @@ func NewMaskWriter(w io.Writer, mask byte) *MaskWriter {
 
 func (w MaskWriter) Write(p []byte) (n int, err error) {
 	b := pool.Get()
-	defer pool.Put(b)
+	defer func() {
+		pool.Put(b)
+	}()
 
-	var nn int
-	for nn < len(p) {
-		bn := copy(b, p[nn:])
-		nn += bn
-		for i := range b[:bn] {
-			b[i] ^= w.Mask
-		}
-		wn, err := w.Writer.Write(b[:bn])
-		n += wn
-		if err != nil {
-			return n, err
-		}
+	if cap(b) < len(p) {
+		b = make([]byte, len(p))
+	}
+
+	bn := copy(b[:len(p)], p)
+	for i := range b[:bn] {
+		b[i] ^= w.Mask
+	}
+	wn, err := w.Writer.Write(b[:bn])
+	n += wn
+	if err != nil {
+		return n, err
 	}
 	return
 }
