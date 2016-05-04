@@ -14,7 +14,6 @@ import (
 	"golang.org/x/net/websocket"
 
 	"net/http"
-	_ "net/http/pprof"
 	"net/url"
 )
 
@@ -84,6 +83,10 @@ func main() {
 	hmap := map[string]http.Handler{
 		"proxy":  proxyHandler,
 		"remote": remoteProxy,
+		"block": LogHandler("block  <--", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			s := http.StatusForbidden
+			http.Error(w, http.StatusText(s), s)
+		})),
 	}
 	f, err := os.OpenFile("data.txt", os.O_RDWR|os.O_CREATE, 0666)
 	if err != nil {
