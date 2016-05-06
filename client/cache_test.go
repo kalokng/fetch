@@ -70,3 +70,66 @@ func TestCache(t *testing.T) {
 		}
 	}
 }
+
+func TestStar(t *testing.T) {
+	out := make(chan string, 1)
+	h := make(map[string]http.Handler, 5)
+	for _, v := range strings.Split("12345", "") {
+		v := v
+		h[v] = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			out <- v
+		})
+	}
+	d := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		out <- "def"
+	})
+
+	c := NewCacheHandler(d, h, nil)
+	f, err := os.OpenFile("data.txt", os.O_RDWR|os.O_CREATE, 0666)
+	if err != nil {
+		panic(err)
+	}
+	c.SaveW = f
+	for k, v := range h {
+		c.Set("*"+k, k, v)
+	}
+	req := &http.Request{}
+	for _, v := range strings.Split("x0;x1;x2;x3;x4;x5;x6;0;1;2;3;4;5;6", ";") {
+		req.Host = v
+		c.ServeHTTP(nil, req)
+		select {
+		case s := <-out:
+			if v[len(v)-1:] != s {
+				switch s {
+				case "def":
+				default:
+					t.Fatalf("%s : %s", v, s)
+				}
+			}
+		default:
+			t.Fatal("No out")
+		}
+	}
+	var obuf bytes.Buffer
+	if err := c.Save(&obuf); err != nil {
+		t.Fatal(err)
+	}
+
+	nc := NewCacheHandler(d, h, &obuf)
+	for _, v := range strings.Split("x0;x1;x2;x3;x4;x5;x6;0;1;2;3;4;5;6", ";") {
+		req.Host = v
+		nc.ServeHTTP(nil, req)
+		select {
+		case s := <-out:
+			if v[len(v)-1:] != s {
+				switch s {
+				case "def":
+				default:
+					t.Fatalf("%s : %s", v, s)
+				}
+			}
+		default:
+			t.Fatal("No out")
+		}
+	}
+}

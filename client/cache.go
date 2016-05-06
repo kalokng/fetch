@@ -36,11 +36,31 @@ type CacheHandler struct {
 
 var ErrWriting = errors.New("cache is writing")
 
+func compareHost(a, b string) int {
+	var i int
+	an, bn := len(a), len(b)
+	var as, bs byte
+	for i = 1; i <= an && i <= bn; i++ {
+		as, bs = a[an-i], b[bn-i]
+		if as != bs {
+			switch {
+			case i == an && as == '*', i == bn && bs == '*':
+				return 0
+			case as > bs:
+				return +1
+			default:
+				return -1
+			}
+		}
+	}
+	return 0
+}
+
 func NewCacheHandler(h http.Handler, hmap map[string]http.Handler, r io.Reader) *CacheHandler {
 	c := &CacheHandler{
 		tree: b.TreeNew(func(a, b interface{}) int {
 			as, bs := a.(string), b.(string)
-			return strings.Compare(as, bs)
+			return compareHost(as, bs)
 		}),
 		Default: h,
 	}
