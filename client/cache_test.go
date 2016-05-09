@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestCache(t *testing.T) {
@@ -22,11 +23,11 @@ func TestCache(t *testing.T) {
 	})
 
 	c := NewCacheHandler(d, h, nil)
-	f, err := os.OpenFile("data.txt", os.O_RDWR|os.O_CREATE, 0666)
+	f, err := os.OpenFile("test_data.txt", os.O_RDWR|os.O_CREATE, 0666)
 	if err != nil {
 		panic(err)
 	}
-	c.SaveW = f
+	c.AutoSaveTo(f)
 	for k, v := range h {
 		c.Set(k+k, k, v)
 	}
@@ -69,6 +70,7 @@ func TestCache(t *testing.T) {
 			t.Fatal("No out")
 		}
 	}
+	time.Sleep(1e7)
 }
 
 func TestStar(t *testing.T) {
@@ -85,11 +87,11 @@ func TestStar(t *testing.T) {
 	})
 
 	c := NewCacheHandler(d, h, nil)
-	f, err := os.OpenFile("data.txt", os.O_RDWR|os.O_CREATE, 0666)
+	f, err := os.OpenFile("test_data.txt", os.O_RDWR|os.O_CREATE, 0666)
 	if err != nil {
 		panic(err)
 	}
-	c.SaveW = f
+	c.AutoSaveTo(f)
 	for k, v := range h {
 		c.Set("*"+k, k, v)
 	}
@@ -132,4 +134,5 @@ func TestStar(t *testing.T) {
 			t.Fatal("No out")
 		}
 	}
+	time.Sleep(1e7)
 }

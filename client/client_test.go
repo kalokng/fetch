@@ -11,7 +11,7 @@ import (
 	"github.com/kalokng/fetch"
 )
 
-func TestWeb(t *testing.T) {
+func testWeb(t *testing.T) {
 	resp, err := http.Get("https://toy-fands.rhcloud.com/web")
 	if err != nil {
 		panic(err)
@@ -19,7 +19,7 @@ func TestWeb(t *testing.T) {
 	resp.Write(os.Stdout)
 }
 
-func TestWsecho(t *testing.T) {
+func testWsecho(t *testing.T) {
 	var n int
 	url := "ws://toy-fands.rhcloud.com:8000/echo"
 	conn, err := ProxyDial(url, "", url)
@@ -65,7 +65,7 @@ func TestWsecho(t *testing.T) {
 	}
 }
 
-func TestEcho(t *testing.T) {
+func testEcho(t *testing.T) {
 	url := "http://toy2-fands.rhcloud.com/echo3"
 	conn, err := ProxyHTTP(url)
 	if err != nil {

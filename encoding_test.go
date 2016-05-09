@@ -58,7 +58,7 @@ func dataRand(n int, min, max byte) []byte {
 	return b
 }
 
-func method(t dataType) (name string, f genData) {
+func method(t dataType) (name string, fn genData) {
 	switch t {
 	case genAcs:
 		return "dataAcs", dataAcs

@@ -14,6 +14,7 @@ import (
 	"golang.org/x/net/websocket"
 
 	"net/http"
+	_ "net/http/pprof"
 	"net/url"
 )
 
@@ -93,7 +94,7 @@ func main() {
 		panic(err)
 	}
 	cache := NewCacheHandler(nil, hmap, f)
-	cache.SaveW = f
+	cache.AutoSaveTo(f)
 
 	// default handler
 	defProxy := createProxy()
@@ -120,8 +121,6 @@ func main() {
 
 	fmt.Println("Start listening", ":"+localPort)
 	err = http.ListenAndServe(":"+localPort, cache)
-
-	//err = http.ListenAndServe(":"+localPort, LogHandler(proxy))
 	if err != nil {
 		panic(err)
 	}

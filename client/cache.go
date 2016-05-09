@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"strings"
 	"sync"
-	"sync/atomic"
 
 	"github.com/cznic/b"
 )
@@ -28,10 +27,11 @@ type SyncWriter interface {
 type CacheHandler struct {
 	tree    *b.Tree
 	Default http.Handler
+	Local   http.Handler
 	lock    sync.RWMutex
 
-	SaveW   SyncWriter
-	writing int32
+	sLock  sync.Mutex
+	writeQ chan struct{}
 }
 
 var ErrWriting = errors.New("cache is writing")
@@ -71,6 +71,16 @@ func NewCacheHandler(h http.Handler, hmap map[string]http.Handler, r io.Reader) 
 }
 
 func (c *CacheHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// Not a proxy request
+	if r.URL.Host == "" {
+		h := c.Local
+		if h == nil {
+			h = http.DefaultServeMux
+		}
+		h.ServeHTTP(w, r)
+		return
+	}
+
 	c.lock.RLock()
 	e, ok := c.tree.Seek(r.Host)
 	c.lock.RUnlock()
@@ -93,21 +103,37 @@ func (c *CacheHandler) Set(addr, name string, h http.Handler) {
 	c.set(addr, name, h)
 	c.lock.Unlock()
 
-	if name != "" && c.SaveW != nil {
-		go func() {
-			if !atomic.CompareAndSwapInt32(&c.writing, 0, 1) {
-				return
-			}
-			defer atomic.StoreInt32(&c.writing, 0)
-			c.SaveW.Seek(0, 0)
-			c.Save(c.SaveW)
-			c.SaveW.Sync()
-		}()
+	if name != "" && c.writeQ != nil {
+		c.sLock.Lock()
+		defer c.sLock.Unlock()
+
+		//non-blocking push
+		select {
+		case c.writeQ <- struct{}{}:
+		default:
+		}
 	}
 }
 
 func (c *CacheHandler) set(addr, name string, h http.Handler) {
 	c.tree.Set(addr, &item{name: name, h: h})
+}
+
+func (c *CacheHandler) AutoSaveTo(w SyncWriter) {
+	c.sLock.Lock()
+	defer c.sLock.Unlock()
+
+	if c.writeQ != nil {
+		close(c.writeQ)
+	}
+	c.writeQ = make(chan struct{}, 1)
+	go func() {
+		for range c.writeQ {
+			w.Seek(0, 0)
+			c.Save(w)
+			w.Sync()
+		}
+	}()
 }
 
 func (c *CacheHandler) Save(w io.Writer) error {
