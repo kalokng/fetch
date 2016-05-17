@@ -103,14 +103,16 @@ func (c *CacheHandler) Set(addr, name string, h http.Handler) {
 	c.set(addr, name, h)
 	c.lock.Unlock()
 
-	if name != "" && c.writeQ != nil {
+	if name != "" {
 		c.sLock.Lock()
 		defer c.sLock.Unlock()
 
-		//non-blocking push
-		select {
-		case c.writeQ <- struct{}{}:
-		default:
+		if c.writeQ != nil {
+			//non-blocking push
+			select {
+			case c.writeQ <- struct{}{}:
+			default:
+			}
 		}
 	}
 }
