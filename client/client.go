@@ -109,9 +109,6 @@ func main() {
 		return err
 	}
 	defProxy.ValidConnect = func(req *http.Request, c net.Conn) error {
-		if req.URL.Scheme != "https" {
-			return nil
-		}
 		err := handshakeConnect(req.URL, c)
 		if err == nil {
 			go cache.Set(req.Host, "", proxyHandler)
