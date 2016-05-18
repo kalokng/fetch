@@ -1,21 +1,11 @@
 package main
 
 import (
-	"fmt"
 	"log"
 	"net"
-	"net/http"
-	"net/http/httputil"
-	"net/url"
-
-	"golang.org/x/net/websocket"
 )
 
 type funcConn func() (net.Conn, error)
-
-func Connect(url, origin string) (net.Conn, error) {
-	return websocket.Dial(url, "", origin)
-}
 
 func logConnect(fn funcConn) funcConn {
 	return func() (net.Conn, error) {
@@ -27,6 +17,7 @@ func logConnect(fn funcConn) funcConn {
 	}
 }
 
+/* Comment the unused functions
 func HttpConnect(proxy, url_ string) (net.Conn, error) {
 	p, err := net.Dial("tcp", proxy)
 	if err != nil {
@@ -56,11 +47,11 @@ func HttpConnect(proxy, url_ string) (net.Conn, error) {
 }
 
 func ProxyDial(url_, protocol, origin string) (ws *websocket.Conn, err error) {
-	if proxyUrl == "" {
+	if proxyURL == "" {
 		return websocket.Dial(url_, protocol, origin)
 	}
 
-	purl, err := url.Parse(proxyUrl)
+	purl, err := url.Parse(proxyURL)
 	if err != nil {
 		return nil, err
 	}
@@ -83,7 +74,7 @@ func ProxyDial(url_, protocol, origin string) (ws *websocket.Conn, err error) {
 }
 
 func ProxyHTTP(url_ string) (c net.Conn, err error) {
-	if proxyUrl == "" {
+	if proxyURL == "" {
 		fmt.Println("url_", url_)
 		turl, err := url.Parse(url_)
 		if err != nil {
@@ -111,10 +102,11 @@ func ProxyHTTP(url_ string) (c net.Conn, err error) {
 		return rwc, nil
 	}
 
-	purl, err := url.Parse(proxyUrl)
+	purl, err := url.Parse(proxyURL)
 	if err != nil {
 		return nil, err
 	}
 
 	return HttpConnect(purl.Host, url_)
 }
+*/

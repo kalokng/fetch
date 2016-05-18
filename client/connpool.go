@@ -1,46 +1,24 @@
 package main
 
-import (
-	"errors"
-	"net"
-	"sync"
-)
+import "net"
 
-var NoConnection = errors.New("No connection can be established")
-
-type ConnPool struct {
-	pool sync.Pool
+// ConnPool is an interface for create / retrieve conn
+type ConnPool interface {
+	Get() (net.Conn, error)
+	Put(net.Conn)
 }
 
-func (p *ConnPool) Get() (net.Conn, error) {
+// SimplePool type is an adapter to allow the use of ordinary functions as ConnPool
+type SimplePool func() (net.Conn, error)
+
+// Get calls p().
+func (p SimplePool) Get() (net.Conn, error) {
 	//fmt.Println("  >> GET")
-	v := p.pool.Get()
-	conn, ok := v.(net.Conn)
-	if conn == nil || !ok {
-		if err, ok := v.(error); ok {
-			return nil, err
-		}
-		return nil, NoConnection
-	}
-	return conn, nil
+	return p()
 }
 
-func (p *ConnPool) Put(conn net.Conn) {
+// Put will call conn.Close().
+func (p SimplePool) Put(conn net.Conn) {
 	//fmt.Println("<<   Put")
 	conn.Close()
-	//p.pool.Put(conn)
-}
-
-func NewConnPool(newConn func() (net.Conn, error)) *ConnPool {
-	return &ConnPool{
-		pool: sync.Pool{
-			New: func() interface{} {
-				conn, err := newConn()
-				if err != nil {
-					return err
-				}
-				return conn
-			},
-		},
-	}
 }

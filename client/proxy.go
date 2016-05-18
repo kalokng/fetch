@@ -23,10 +23,14 @@ import (
 
 var encoder = base64.StdEncoding
 
+// NTLMProxy implements a basic proxy as an adapter to a NTLM Authentication proxy.
+//
+// It implements http.Handler, and if it found the response or connection is
+// not valid, it will call Fallback handler.
 type NTLMProxy struct {
 	cred      *sspi.Credentials
 	transport *http.Transport
-	proxyUrl  *url.URL
+	proxyURL  *url.URL
 
 	ValidHTTP    func(req *http.Request, resp *http.Response) error
 	ValidConnect func(req *http.Request, c net.Conn) error
@@ -35,6 +39,7 @@ type NTLMProxy struct {
 
 type bytePool sync.Pool
 
+// for buffer reuse
 var ntlmPool = bytePool(sync.Pool{
 	New: func() interface{} {
 		return make([]byte, ntlm.PackageInfo.MaxToken)
@@ -49,11 +54,17 @@ func (p *bytePool) Put(b []byte) {
 	(*sync.Pool)(p).Put(b)
 }
 
-func NewNTLMProxy(proxyUrl string) (*NTLMProxy, error) {
-	pUrl, err := url.Parse(proxyUrl)
-	if err != nil {
-		return nil, err
+// NewNTLMProxy return a NTLMProxy connects to the proxy at proxyURL.
+func NewNTLMProxy(proxyURL string) (*NTLMProxy, error) {
+	var pURL *url.URL
+	if proxyURL != "" {
+		var err error
+		pURL, err = url.Parse(proxyURL)
+		if err != nil {
+			return nil, err
+		}
 	}
+
 	cred, err := ntlm.AcquireCurrentUserCredentials()
 	if err != nil {
 		return nil, err
@@ -65,24 +76,16 @@ func NewNTLMProxy(proxyUrl string) (*NTLMProxy, error) {
 				if r.URL.Scheme == "https" {
 					return nil, nil
 				}
-				return pUrl, nil
+				return pURL, nil
 			},
 			Dial: net.Dial,
 		},
-		proxyUrl: pUrl,
+		proxyURL: pURL,
 	}
 	return p, nil
 }
 
-/*
-func (p *NTLMProxy) dial(method, address string) (net.Conn, error) {
-	conn, err := net.Dial("tcp", address)
-	if err != nil {
-		return err
-	}
-}
-*/
-
+// ServeHTTP implements http.Handler
 func (p *NTLMProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case "CONNECT":
@@ -92,13 +95,21 @@ func (p *NTLMProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// dial create a connection to r via proxy. The returned Conn will be ready for tls handshake.
 func (p *NTLMProxy) dial(r *url.URL) (net.Conn, error) {
+	if p.proxyURL == nil {
+		// No proxy, just normal Dial...
+		return p.transport.Dial("tcp", r.Host)
+	}
+
+	// Follows the messages in https://msdn.microsoft.com/en-us/library/cc669093.aspx
+	// But we starts with NEGOTIATE message directly. Message (3) in the link.
 	context, b, err := ntlm.NewClientContext(p.cred)
 	if err != nil {
 		return nil, errors.New("Cannot create client context: " + err.Error())
 	}
 
-	remote, err := p.transport.Dial("tcp", p.proxyUrl.Host)
+	remote, err := p.transport.Dial("tcp", p.proxyURL.Host)
 	if err != nil {
 		return nil, errors.New("Failed to dial: " + err.Error())
 	}
@@ -122,7 +133,7 @@ func (p *NTLMProxy) dial(r *url.URL) (net.Conn, error) {
 	}
 	encoder.Encode(cb, b)
 	pr.Header.Set("Proxy-Authorization", fmt.Sprintf("NTLM %s", cb[:n]))
-	pr.Write(remote)
+	pr.WriteProxy(remote)
 
 	// Read response.
 	// Okay to use and discard buffered reader here, because
@@ -147,10 +158,11 @@ func (p *NTLMProxy) dial(r *url.URL) (net.Conn, error) {
 		return remote, nil
 	}
 
-	// comsume the body
+	// comsume the body, so we can reuse the connection
 	io.Copy(ioutil.Discard, resp.Body)
 	resp.Body.Close()
 
+	// Get the challenge from header
 	auth := resp.Header.Get("Proxy-Authenticate")
 	f := strings.SplitN(auth, " ", 2)
 	if len(f) < 2 {
@@ -166,6 +178,7 @@ func (p *NTLMProxy) dial(r *url.URL) (net.Conn, error) {
 	if cap(challenge) < n {
 		challenge = make([]byte, n)
 	}
+
 	_, err = encoder.Decode(challenge, []byte(encodedChg))
 	if err != nil {
 		remote.Close()
@@ -179,6 +192,7 @@ func (p *NTLMProxy) dial(r *url.URL) (net.Conn, error) {
 	}
 
 	// 2nd request: Client -> Proxy response
+	// After the proxy reply, the connection is ready to use
 	n = encoder.EncodedLen(len(b))
 	if cap(cb) < n {
 		cb = make([]byte, n)
@@ -187,7 +201,7 @@ func (p *NTLMProxy) dial(r *url.URL) (net.Conn, error) {
 	pr.Header.Set("Proxy-Connection", "Keep-Alive")
 	pr.Header.Set("Proxy-Authorization", fmt.Sprintf("NTLM %s", cb[:n]))
 
-	pr.Write(remote)
+	pr.WriteProxy(remote)
 	resp, err = http.ReadResponse(br, pr)
 	if err != nil {
 		remote.Close()
@@ -204,15 +218,19 @@ func (p *NTLMProxy) dial(r *url.URL) (net.Conn, error) {
 	return remote, nil
 }
 
+// handleConnect handles https request.
 func (p *NTLMProxy) handleConnect(w http.ResponseWriter, r *http.Request) {
+	// Get a connection via proxy
 	remote, err := p.dial(r.URL)
 	if err != nil {
 		http.Error(w, "Failed to establish tunnel connection: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
+	// Check if the connection is valid
 	if p.ValidConnect != nil {
 		err := p.ValidConnect(r, remote)
+		// The connection is used by checking, we have to close it
 		if err != nil {
 			remote.Close()
 			log.Print("Failed to establish connection: " + err.Error())
@@ -223,6 +241,7 @@ func (p *NTLMProxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 			}
 			return
 		}
+		// The request is able to go through proxy, just establish again
 		remote, err = p.dial(r.URL)
 	}
 
@@ -241,15 +260,15 @@ func (p *NTLMProxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// comsume whatever the server says
-	//io.Copy(ioutil.Discard, resp.Body)
-	//resp.Body.Close()
+	// tell the client its ready
 	conn.Write([]byte("HTTP/1.1 200 OK\r\n\r\n"))
 
+	// start tunnel
 	go copyAndClose(remote, conn)
 	go copyAndClose(conn, remote)
 }
 
+// handleHTTP handles http request.
 func (p *NTLMProxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	// temporary store the body, so will not be consumed in handshake
 	body := r.Body
@@ -300,6 +319,17 @@ func (p *NTLMProxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+
+		// although it replies early, still need to validate
+		if p.ValidHTTP != nil {
+			if err := p.ValidHTTP(r, resp); err != nil {
+				if p.Fallback != nil {
+					p.Fallback.ServeHTTP(w, r)
+					return
+				}
+				log.Print("Invalid response from " + r.Host)
+			}
+		}
 		pushResponse(w, resp)
 		return
 	}
@@ -335,6 +365,7 @@ func (p *NTLMProxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 2nd request: Client -> Proxy response
+	// The proxy will reply the content we want at the same time
 	n = encoder.EncodedLen(len(b))
 	if cap(cb) < n {
 		cb = make([]byte, n)
@@ -368,8 +399,9 @@ func (p *NTLMProxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	pushResponse(w, resp)
 }
 
-func (p *NTLMProxy) Websocket(url_, protocol, origin string) (ws *websocket.Conn, err error) {
-	config, err := websocket.NewConfig(url_, origin)
+// Websocket creates a websocket via the proxy
+func (p *NTLMProxy) Websocket(urlStr, protocol, origin string) (ws *websocket.Conn, err error) {
+	config, err := websocket.NewConfig(urlStr, origin)
 	if err != nil {
 		return nil, err
 	}
@@ -378,19 +410,22 @@ func (p *NTLMProxy) Websocket(url_, protocol, origin string) (ws *websocket.Conn
 		config.Protocol = []string{protocol}
 	}
 
-	rpUrl, err := url.Parse(url_)
+	rpURL, err := url.Parse(urlStr)
 	if err != nil {
 		return nil, err
 	}
 
-	client, err := p.dial(rpUrl)
+	// establish a connection via proxy
+	client, err := p.dial(rpURL)
 	if err != nil {
 		return nil, err
 	}
 
+	// Create a websocket from connection
 	return websocket.NewClient(config, client)
 }
 
+// pushResponse writes the response to the ResponseWriter
 func pushResponse(w http.ResponseWriter, resp *http.Response) {
 	hj, ok := w.(http.Hijacker)
 	if !ok {

@@ -6,6 +6,7 @@ import (
 	"net/http"
 )
 
+// LogHandler is an adapter which prints a log with prefix, the request method and host.
 func LogHandler(prefix string, h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		go log.Printf("%s %s: %s", prefix, r.Method, r.URL.Host)
@@ -13,7 +14,13 @@ func LogHandler(prefix string, h http.Handler) http.Handler {
 	})
 }
 
-func Tunnel(pool *ConnPool) http.Handler {
+// Tunnel returns a http.Handler, that whenever a request comes from client, it
+// will create a conn from pool, and copy what they send and receive to each
+// other.
+//
+// Tunnel serve as a middle man between client and remote side. From client
+// point of view, it looks like it talks to the remote side.
+func Tunnel(pool ConnPool) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := pool.Get()
 		if err != nil {

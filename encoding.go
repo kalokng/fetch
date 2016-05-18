@@ -28,8 +28,11 @@ type encoder struct {
 	r   [utf8.UTFMax]byte
 }
 
+// NewEncoder return a writer that write bytes in a utf-8 compatible way.
 func NewEncoder(w io.Writer) io.Writer { return &encoder{w: w} }
 
+// For bytes 0x00-0x7F, it will not change the content.
+// For bytes 0x80-0xFF, it may combines the following byte to form 2-3 bytes utf-8 rune.
 func (e *encoder) Write(p []byte) (n int, err error) {
 	i := 0
 	for j := 0; j < len(p); j++ {
@@ -79,8 +82,10 @@ type decoder struct {
 	nrm  int
 }
 
+// NewDecoder returns a reader that convert utf-8 bytes back to bytes
 func NewDecoder(r io.Reader) io.Reader { return &decoder{r: r} }
 
+// Read will read the underlying reader and convert from utf-8 bytes to normal bytes
 func (d *decoder) Read(p []byte) (n int, err error) {
 	if len(p) == 0 {
 		return 0, nil
@@ -152,5 +157,4 @@ func (d *decoder) Read(p []byte) (n int, err error) {
 		//fmt.Println(nn, err, d.buf[d.nbuf:nn])
 		d.nbuf += nn
 	}
-	return
 }

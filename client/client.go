@@ -1,3 +1,6 @@
+// client will serve as a proxy with basic authentication method. It will
+// communicate with the underlying proxy, or send requests to remote proxy if
+// the requests are blocked by the underlying proxy.
 package main
 
 import (
@@ -18,8 +21,8 @@ import (
 	"net/url"
 )
 
-var proxyUrl string
-var hostUrl string
+var proxyURL string
+var hostURL string
 var localPort string
 
 func getRemoteProxy() string {
@@ -32,8 +35,8 @@ func getRemoteProxy() string {
 
 func init() {
 	flag.StringVar(&localPort, "port", "8282", "the port this server going to listen")
-	flag.StringVar(&hostUrl, "host", getRemoteProxy(), "Address of Remote server, $REMOTE_PROXY if set")
-	flag.StringVar(&proxyUrl, "proxy", os.Getenv("HTTP_PROXY"), "Address of HTTP proxy server, $HTTP_PROXY if set")
+	flag.StringVar(&hostURL, "host", getRemoteProxy(), "Address of Remote server, $REMOTE_PROXY if set")
+	flag.StringVar(&proxyURL, "proxy", os.Getenv("HTTP_PROXY"), "Address of HTTP proxy server, $HTTP_PROXY if set")
 }
 
 func main() {
@@ -42,7 +45,8 @@ func main() {
 	port := "8000"
 	proto := "https"
 
-	sch := strings.SplitN(hostUrl, "://", 2)
+	// parse the hostURL
+	sch := strings.SplitN(hostURL, "://", 2)
 	if len(sch) > 1 {
 		proto = sch[0]
 	}
@@ -53,32 +57,32 @@ func main() {
 		port = l[1]
 	}
 
-	var origin, pUrl string
+	var origin, pURL string
 	switch proto {
 	case "http":
 		origin = "http://" + host + "/"
-		pUrl = "ws://" + host + ":" + port + "/p"
+		pURL = "ws://" + host + ":" + port + "/p"
 	case "https":
 		origin = "https://" + host + "/"
-		pUrl = "wss://" + host + ":" + port + "/p"
+		pURL = "wss://" + host + ":" + port + "/p"
 	default:
 		fmt.Println("Unknown protocol")
 		return
 	}
 
 	fmt.Printf("Connect to %s:%s\n", host, port)
-	if proxyUrl == "" {
+	if proxyURL == "" {
 		fmt.Println("Without http proxy")
 	} else {
-		fmt.Printf("Wtih http proxy %s\n", proxyUrl)
+		fmt.Printf("Wtih http proxy %s\n", proxyURL)
 	}
 
 	// handler to ask local proxy
-	proxy := createProxy()
+	proxy := createProxy(proxyURL)
 	proxyHandler := LogHandler("proxy  <--", proxy)
 
 	// handler to ask remote proxy
-	remoteProxy := LogHandler("remote <--", createRemoteProxy(proxy, pUrl, "", origin))
+	remoteProxy := LogHandler("remote <--", createRemoteProxy(proxy, pURL, "", origin))
 
 	// cache handler
 	hmap := map[string]http.Handler{
@@ -89,6 +93,7 @@ func main() {
 			http.Error(w, http.StatusText(s), s)
 		})),
 	}
+	// read / write to the file
 	f, err := os.OpenFile("data.txt", os.O_RDWR|os.O_CREATE, 0666)
 	if err != nil {
 		panic(err)
@@ -96,8 +101,9 @@ func main() {
 	cache := NewCacheHandler(nil, hmap, f)
 	cache.AutoSaveTo(f)
 
-	// default handler
-	defProxy := createProxy()
+	// default handler, which is also a local proxy, but will validate the result.
+	// Whenever it finds the request is blocked, store the host to cache and fallback to remote
+	defProxy := createProxy(proxyURL)
 	defProxy.Fallback = remoteProxy
 	defProxy.ValidHTTP = func(req *http.Request, resp *http.Response) error {
 		err := validHTTP(req, resp)
@@ -111,6 +117,8 @@ func main() {
 	defProxy.ValidConnect = func(req *http.Request, c net.Conn) error {
 		err := handshakeConnect(req.URL, c)
 		if err == nil {
+			// handshaking will make the client establish the connection once more
+			// just remember it when it is running
 			go cache.Set(req.Host, "", proxyHandler)
 		} else {
 			go cache.Set(req.Host, "remote", remoteProxy)
@@ -119,6 +127,7 @@ func main() {
 	}
 	cache.Default = LogHandler("       <--", defProxy)
 
+	// start handling requests
 	fmt.Println("Start listening", ":"+localPort)
 	err = http.ListenAndServe(":"+localPort, cache)
 	if err != nil {
@@ -126,25 +135,23 @@ func main() {
 	}
 }
 
-func createFallback(name string, h http.Handler, cache *CacheHandler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		go cache.Set(r.Host, name, h)
-		h.ServeHTTP(w, r)
-	})
-}
-
-func createProxy() *NTLMProxy {
-	proxy, _ := NewNTLMProxy(proxyUrl)
+func createProxy(proxyURL string) *NTLMProxy {
+	proxy, err := NewNTLMProxy(proxyURL)
+	if err != nil {
+		panic(err)
+	}
 	return proxy
 }
 
-var notFound = errors.New("Not found")
-var filtered = errors.New("Filtered")
+var errNotFound = errors.New("Not found")
+var errFiltered = errors.New("Filtered")
 
+// check if the request is blocked.
+// just check if the response is redirecting to a known host
 func validHTTP(req *http.Request, resp *http.Response) error {
 	switch {
 	case resp.StatusCode >= 400:
-		return notFound
+		return errNotFound
 	case resp.StatusCode >= 300 && resp.StatusCode != http.StatusNotModified:
 		l := resp.Header.Get("Location")
 		u, err := url.Parse(l)
@@ -152,7 +159,7 @@ func validHTTP(req *http.Request, resp *http.Response) error {
 			return err
 		}
 		if u.Host == "alert.scansafe.net" {
-			return filtered
+			return errFiltered
 		}
 	}
 	return nil
@@ -160,6 +167,8 @@ func validHTTP(req *http.Request, resp *http.Response) error {
 
 func hasPort(s string) bool { return strings.LastIndex(s, ":") > strings.LastIndex(s, "]") }
 
+// handshakeConnect sends a tls handshake to the connection.
+// If the reply is not valid (e.g access denied), then we assume it is blocked
 func handshakeConnect(u *url.URL, c net.Conn) error {
 	h := u.Host
 	if hasPort(h) {
@@ -170,10 +179,11 @@ func handshakeConnect(u *url.URL, c net.Conn) error {
 	return tlsConn.Handshake()
 }
 
-func createRemoteProxy(proxy *NTLMProxy, pUrl, protocol, origin string) http.Handler {
+// createRemoteProxy use the NTLMProxy to establish a websocket connection, tunnel to remote server
+func createRemoteProxy(proxy *NTLMProxy, pURL, protocol, origin string) http.Handler {
 	genConn := func() (net.Conn, error) {
-		//conn, err := ProxyDial(pUrl, "", origin)
-		conn, err := proxy.Websocket(pUrl, "", origin)
+		//conn, err := ProxyDial(pURL, "", origin)
+		conn, err := proxy.Websocket(pURL, "", origin)
 		if err != nil {
 			return nil, err
 		}
@@ -181,5 +191,5 @@ func createRemoteProxy(proxy *NTLMProxy, pUrl, protocol, origin string) http.Han
 		return fetch.NewClientConn(conn, 0x56), nil
 	}
 	genConn = logConnect(genConn)
-	return Tunnel(NewConnPool(genConn))
+	return Tunnel(SimplePool(genConn))
 }

@@ -11,6 +11,7 @@ type utf8Conn struct {
 	r io.Reader
 }
 
+// NewUtf8Conn wraps c so it can send any bytes in utf-8 compatibility
 func NewUtf8Conn(c net.Conn) net.Conn {
 	w := NewEncoder(c)
 	r := NewDecoder(c)
@@ -34,6 +35,7 @@ type serverConn struct {
 	w io.Writer
 }
 
+// NewServerConn wraps c so it will XOR the sending streams with mask byte.
 func NewServerConn(c net.Conn, mask byte) net.Conn {
 	w := NewMaskWriter(c, mask)
 	return &serverConn{
@@ -51,6 +53,7 @@ type clientConn struct {
 	r io.Reader
 }
 
+// NewClientConn wraps c so it will XOR the receiving streams with mask byte
 func NewClientConn(c net.Conn, mask byte) net.Conn {
 	r := NewMaskReader(c, mask)
 	return &clientConn{

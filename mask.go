@@ -21,11 +21,14 @@ func (p *bytePool) Put(b []byte) {
 	(*sync.Pool)(p).Put(b)
 }
 
+// MaskWriter will mask with byte Mask when writes to writer.
+// No buffering will be used.
 type MaskWriter struct {
 	io.Writer
 	Mask byte
 }
 
+// NewMaskWriter creates a MaskWriter with w and mask.
 func NewMaskWriter(w io.Writer, mask byte) *MaskWriter {
 	return &MaskWriter{Writer: w, Mask: mask}
 }
@@ -52,11 +55,14 @@ func (w MaskWriter) Write(p []byte) (n int, err error) {
 	return
 }
 
+// MaskReader will mask with byte Mask when reads from reader.
+// No buffering will be used.
 type MaskReader struct {
 	io.Reader
 	Mask byte
 }
 
+// NewMaskReader creates a MaskReader with w and mask.
 func NewMaskReader(r io.Reader, mask byte) *MaskReader {
 	return &MaskReader{Reader: r, Mask: mask}
 }

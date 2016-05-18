@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -18,24 +17,37 @@ type item struct {
 	h    http.Handler
 }
 
+// SyncWriter is interface used for writing cache to file.
 type SyncWriter interface {
 	io.Writer
 	Sync() error
 	Seek(offset int64, whence int) (ret int64, err error)
 }
 
+// CacheHandler stores a mapping of host to http.Handler in a tree structure.
+// CacheHandler implements http.Handler, so it can be used in http.ListenAndServe.
+//
+// If the request is for local server, it will call the Local handler.
+// Otherwise it will search in the tree for handler, or fallback to Default.
+//
+// The compare function will only compare the request.Host . Wild card can be
+// used, but only accepts when it is at the beginning.
 type CacheHandler struct {
-	tree    *b.Tree
+	tree *b.Tree
+	lock sync.RWMutex
+	// The default handler when entity is not found in cache.
+	// If it is nil, and handler not found, it will response an internal error
 	Default http.Handler
-	Local   http.Handler
-	lock    sync.RWMutex
+	// Handler to handle request to local server. If it is nil,
+	// http.DefaultServeMux will be called.
+	Local http.Handler
 
 	sLock  sync.Mutex
 	writeQ chan struct{}
 }
 
-var ErrWriting = errors.New("cache is writing")
-
+// Compare from the end of string to the beginning.
+// Accept wild card at the beginning
 func compareHost(a, b string) int {
 	var i int
 	an, bn := len(a), len(b)
@@ -56,6 +68,8 @@ func compareHost(a, b string) int {
 	return 0
 }
 
+// NewCacheHandler return a new CacheHandler with h as default handler.
+// If r is not nil, CacheHandler will read r and lookup the handler by hmap.
 func NewCacheHandler(h http.Handler, hmap map[string]http.Handler, r io.Reader) *CacheHandler {
 	c := &CacheHandler{
 		tree: b.TreeNew(func(a, b interface{}) int {
@@ -70,6 +84,7 @@ func NewCacheHandler(h http.Handler, hmap map[string]http.Handler, r io.Reader) 
 	return c
 }
 
+// ServeHTTP implements http.Handler
 func (c *CacheHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Not a proxy request
 	if r.URL.Host == "" {
@@ -98,6 +113,8 @@ func (c *CacheHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	c.Default.ServeHTTP(w, r)
 }
 
+// Set stores the mapping of addr to h into the cache.
+// It will also write to file if AutoSaveTo is set, and name is not empty.
 func (c *CacheHandler) Set(addr, name string, h http.Handler) {
 	c.lock.Lock()
 	c.set(addr, name, h)
@@ -117,16 +134,23 @@ func (c *CacheHandler) Set(addr, name string, h http.Handler) {
 	}
 }
 
+// set stores the mapping of addr to h into the cache.
+// Caller must lock the c.lock before calling this function
 func (c *CacheHandler) set(addr, name string, h http.Handler) {
 	c.tree.Set(addr, &item{name: name, h: h})
 }
 
+// AutoSaveTo set a writer so whenever the cache is updated, CacheHandler will write to it.
+// Calling it will remove the previous set writer. Set w to nil to stop auto save.
 func (c *CacheHandler) AutoSaveTo(w SyncWriter) {
 	c.sLock.Lock()
 	defer c.sLock.Unlock()
 
 	if c.writeQ != nil {
 		close(c.writeQ)
+	}
+	if w == nil {
+		return
 	}
 	c.writeQ = make(chan struct{}, 1)
 	go func() {
@@ -138,6 +162,8 @@ func (c *CacheHandler) AutoSaveTo(w SyncWriter) {
 	}()
 }
 
+// Save writes the cache to w. As handler itself cannot be written, it will write its name.
+// Handler without name will not be written.
 func (c *CacheHandler) Save(w io.Writer) error {
 	c.lock.RLock()
 	defer c.lock.RUnlock()
@@ -169,6 +195,7 @@ func (c *CacheHandler) Save(w io.Writer) error {
 	return err
 }
 
+// Read reads from r, and use hmap to lookup the handler for the hosts
 func (c *CacheHandler) Read(r io.Reader, hmap map[string]http.Handler) error {
 	c.lock.Lock()
 	defer c.lock.Unlock()
