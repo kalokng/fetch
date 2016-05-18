@@ -26,6 +26,7 @@ var encoder = base64.StdEncoding
 type NTLMProxy struct {
 	cred      *sspi.Credentials
 	transport *http.Transport
+	proxyUrl  *url.URL
 
 	ValidHTTP    func(req *http.Request, resp *http.Response) error
 	ValidConnect func(req *http.Request, c net.Conn) error
@@ -60,10 +61,15 @@ func NewNTLMProxy(proxyUrl string) (*NTLMProxy, error) {
 	p := &NTLMProxy{
 		cred: cred,
 		transport: &http.Transport{
-			Dial: func(network, addr string) (net.Conn, error) {
-				return net.Dial(network, pUrl.Host)
+			Proxy: func(r *http.Request) (*url.URL, error) {
+				if r.URL.Scheme == "https" {
+					return nil, nil
+				}
+				return pUrl, nil
 			},
+			Dial: net.Dial,
 		},
+		proxyUrl: pUrl,
 	}
 	return p, nil
 }
@@ -92,8 +98,7 @@ func (p *NTLMProxy) dial(r *url.URL) (net.Conn, error) {
 		return nil, errors.New("Cannot create client context: " + err.Error())
 	}
 
-	// what ever the address is, it will go to proxy anyway
-	remote, err := p.transport.Dial("tcp", "")
+	remote, err := p.transport.Dial("tcp", p.proxyUrl.Host)
 	if err != nil {
 		return nil, errors.New("Failed to dial: " + err.Error())
 	}
@@ -284,6 +289,7 @@ func (p *NTLMProxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	// If the proxy didn't request for challenge, just send back to client
 	if resp.StatusCode != http.StatusProxyAuthRequired {
 		if body != nil || method != "GET" {
+			io.Copy(ioutil.Discard, resp.Body)
 			// Resend the request again, with body and correct method
 			r.Body = body
 			r.Method = method
@@ -298,7 +304,6 @@ func (p *NTLMProxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	//dumpResp(resp, true)
 	io.Copy(ioutil.Discard, resp.Body)
 	resp.Body.Close()
 
@@ -399,6 +404,11 @@ func pushResponse(w http.ResponseWriter, resp *http.Response) {
 	}
 	defer conn.Close()
 	resp.Write(conn)
+}
+
+func dumpReq(req *http.Request, body bool) {
+	b, _ := httputil.DumpRequest(req, body)
+	fmt.Printf("%s\n", b)
 }
 
 func dumpResp(resp *http.Response, body bool) {
