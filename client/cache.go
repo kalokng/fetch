@@ -22,6 +22,7 @@ type SyncWriter interface {
 	io.Writer
 	Sync() error
 	Seek(offset int64, whence int) (ret int64, err error)
+	Truncate(size int64) error
 }
 
 // CacheHandler stores a mapping of host to http.Handler in a tree structure.
@@ -96,16 +97,21 @@ func (c *CacheHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var h http.Handler
 	c.lock.RLock()
 	e, ok := c.tree.Seek(r.Host)
-	c.lock.RUnlock()
-
 	if ok {
 		_, v, _ := e.Next()
-		v.(*item).h.ServeHTTP(w, r)
+		h = v.(*item).h
 		e.Close()
+	}
+	c.lock.RUnlock()
+
+	if h != nil {
+		h.ServeHTTP(w, r)
 		return
 	}
+
 	if c.Default == nil {
 		http.Error(w, "No handler", http.StatusInternalServerError)
 		return
@@ -156,24 +162,26 @@ func (c *CacheHandler) AutoSaveTo(w SyncWriter) {
 	go func() {
 		for range c.writeQ {
 			w.Seek(0, 0)
-			c.Save(w)
-			w.Sync()
+			if n, err := c.Save(w); err == nil {
+				w.Sync()
+				w.Truncate(int64(n))
+			}
 		}
 	}()
 }
 
 // Save writes the cache to w. As handler itself cannot be written, it will write its name.
 // Handler without name will not be written.
-func (c *CacheHandler) Save(w io.Writer) error {
+func (c *CacheHandler) Save(w io.Writer) (n int, err error) {
 	c.lock.RLock()
 	defer c.lock.RUnlock()
 
 	e, err := c.tree.SeekFirst()
 	if err != nil {
 		if err == io.EOF {
-			return nil
+			return 0, nil
 		}
-		return err
+		return 0, err
 	}
 	defer e.Close()
 
@@ -185,14 +193,18 @@ func (c *CacheHandler) Save(w io.Writer) error {
 		}
 		name := v.(*item).name
 		if name != "" {
-			fmt.Fprintf(w, "%s\t%s\n", k.(string), name)
+			nn, err := fmt.Fprintf(w, "%s\t%s\n", name, k.(string))
+			n += nn
+			if err != nil {
+				return n, err
+			}
 		}
 	}
 
 	if err == io.EOF {
-		return nil
+		err = nil
 	}
-	return err
+	return n, err
 }
 
 // Read reads from r, and use hmap to lookup the handler for the hosts
@@ -207,7 +219,9 @@ func (c *CacheHandler) Read(r io.Reader, hmap map[string]http.Handler) error {
 			log.Print("Failed to parse line: " + scr.Text())
 			continue
 		}
-		if h, ok := hmap[t[1]]; ok {
+		if h, ok := hmap[t[0]]; ok {
+			c.set(t[1], t[0], h)
+		} else if h, ok := hmap[t[1]]; ok {
 			c.set(t[0], t[1], h)
 		} else {
 			log.Print("Failed to find the handler: " + t[0])

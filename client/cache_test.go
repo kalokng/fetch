@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"testing"
@@ -31,9 +32,10 @@ func TestCache(t *testing.T) {
 	for k, v := range h {
 		c.Set(k+k, k, v)
 	}
-	req := &http.Request{}
+	req := &http.Request{URL: &url.URL{}}
 	for _, v := range strings.Split("00;11;22;33;44;55;66;0;1;2;3;4;5;6", ";") {
 		req.Host = v
+		req.URL.Host = v
 		c.ServeHTTP(nil, req)
 		select {
 		case s := <-out:
@@ -45,11 +47,11 @@ func TestCache(t *testing.T) {
 				}
 			}
 		default:
-			t.Fatal("No out")
+			t.Fatal("No out when: " + v)
 		}
 	}
 	var obuf bytes.Buffer
-	if err := c.Save(&obuf); err != nil {
+	if _, err := c.Save(&obuf); err != nil {
 		t.Fatal(err)
 	}
 
@@ -113,7 +115,7 @@ func TestStar(t *testing.T) {
 		}
 	}
 	var obuf bytes.Buffer
-	if err := c.Save(&obuf); err != nil {
+	if _, err := c.Save(&obuf); err != nil {
 		t.Fatal(err)
 	}
 
