@@ -20,9 +20,9 @@ func LogHandler(prefix string, h http.Handler) http.Handler {
 //
 // Tunnel serve as a middle man between client and remote side. From client
 // point of view, it looks like it talks to the remote side.
-func Tunnel(pool ConnPool) http.Handler {
+func Tunnel(pool funcConn) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		conn, err := pool.Get()
+		conn, err := pool()
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -51,7 +51,7 @@ func Tunnel(pool ConnPool) http.Handler {
 				r.Write(conn)
 				//io.Copy(conn, io.TeeReader(c, os.Stdout))
 				io.Copy(conn, c)
-				pool.Put(conn)
+				conn.Close()
 			}()
 			//io.Copy(io.MultiWriter(c, os.Stdout), conn)
 			io.Copy(c, conn)
@@ -64,6 +64,6 @@ func Tunnel(pool ConnPool) http.Handler {
 		io.Copy(c, conn)
 		//io.Copy(conn, c)
 		c.Close()
-		pool.Put(conn)
+		conn.Close()
 	})
 }

@@ -185,8 +185,9 @@ func createRemoteProxy(proxy *NTLMProxy, pURL, protocol, origin string) http.Han
 		if err != nil {
 			return nil, err
 		}
-		return fetch.NewClientConn(&fetch.WsConnWrapper{Conn: conn}, 0x56), nil
+
+		return fetch.NewClientConn(conn.UnderlyingConn(), 0x56), nil
 	}
 	genConn = logConnect(genConn)
-	return Tunnel(SimplePool(genConn))
+	return Tunnel(genConn)
 }
