@@ -15,10 +15,9 @@ import (
 	"strings"
 	"sync"
 
-	"golang.org/x/net/websocket"
-
 	"github.com/alexbrainman/sspi"
 	"github.com/alexbrainman/sspi/ntlm"
+	"github.com/gorilla/websocket"
 )
 
 var encoder = base64.StdEncoding
@@ -96,10 +95,10 @@ func (p *NTLMProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // dial create a connection to r via proxy. The returned Conn will be ready for tls handshake.
-func (p *NTLMProxy) dial(r *url.URL) (net.Conn, error) {
+func (p *NTLMProxy) dial(addr string) (net.Conn, error) {
 	if p.proxyURL == nil {
 		// No proxy, just normal Dial...
-		return p.transport.Dial("tcp", r.Host)
+		return p.transport.Dial("tcp", addr)
 	}
 
 	// Follows the messages in https://msdn.microsoft.com/en-us/library/cc669093.aspx
@@ -117,7 +116,7 @@ func (p *NTLMProxy) dial(r *url.URL) (net.Conn, error) {
 	pr := &http.Request{
 		Method: "CONNECT",
 		URL:    &url.URL{},
-		Host:   r.Host,
+		Host:   addr,
 		Header: make(http.Header),
 	}
 
@@ -221,7 +220,7 @@ func (p *NTLMProxy) dial(r *url.URL) (net.Conn, error) {
 // handleConnect handles https request.
 func (p *NTLMProxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 	// Get a connection via proxy
-	remote, err := p.dial(r.URL)
+	remote, err := p.dial(r.URL.Host)
 	if err != nil {
 		http.Error(w, "Failed to establish tunnel connection: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -242,7 +241,7 @@ func (p *NTLMProxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		// The request is able to go through proxy, just establish again
-		remote, err = p.dial(r.URL)
+		remote, err = p.dial(r.URL.Host)
 	}
 
 	hj, ok := w.(http.Hijacker)
@@ -401,28 +400,28 @@ func (p *NTLMProxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 
 // Websocket creates a websocket via the proxy
 func (p *NTLMProxy) Websocket(urlStr, protocol, origin string) (ws *websocket.Conn, err error) {
-	config, err := websocket.NewConfig(urlStr, origin)
-	if err != nil {
-		return nil, err
-	}
-
+	var protocols []string
 	if protocol != "" {
-		config.Protocol = []string{protocol}
+		protocols = []string{protocol}
+	}
+	dialer := &websocket.Dialer{
+		NetDial: func(network, addr string) (net.Conn, error) {
+			return p.dial(addr)
+		},
+		Proxy: func(*http.Request) (*url.URL, error) {
+			return p.proxyURL, nil
+		},
+		Subprotocols: protocols,
 	}
 
-	rpURL, err := url.Parse(urlStr)
-	if err != nil {
-		return nil, err
-	}
-
-	// establish a connection via proxy
-	client, err := p.dial(rpURL)
-	if err != nil {
-		return nil, err
-	}
-
+	h := make(http.Header)
+	h.Add("Origin", strings.ToLower(origin))
 	// Create a websocket from connection
-	return websocket.NewClient(config, client)
+	conn, resp, err := dialer.Dial(urlStr, h)
+	if err != nil {
+		fmt.Println("ERROR!", resp.StatusCode)
+	}
+	return conn, err
 }
 
 // pushResponse writes the response to the ResponseWriter

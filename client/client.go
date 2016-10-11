@@ -14,8 +14,6 @@ import (
 
 	"github.com/kalokng/fetch"
 
-	"golang.org/x/net/websocket"
-
 	"net/http"
 	_ "net/http/pprof"
 	"net/url"
@@ -70,7 +68,7 @@ func main() {
 		return
 	}
 
-	fmt.Printf("Connect to %s:%s\n", host, port)
+	fmt.Printf("Connect to %s\n", pURL)
 	if proxyURL == "" {
 		fmt.Println("Without http proxy")
 	} else {
@@ -187,8 +185,7 @@ func createRemoteProxy(proxy *NTLMProxy, pURL, protocol, origin string) http.Han
 		if err != nil {
 			return nil, err
 		}
-		conn.PayloadType = websocket.BinaryFrame
-		return fetch.NewClientConn(conn, 0x56), nil
+		return fetch.NewClientConn(&fetch.WsConnWrapper{Conn: conn}, 0x56), nil
 	}
 	genConn = logConnect(genConn)
 	return Tunnel(SimplePool(genConn))

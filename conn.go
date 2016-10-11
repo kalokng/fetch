@@ -3,6 +3,9 @@ package fetch
 import (
 	"io"
 	"net"
+	"time"
+
+	"github.com/gorilla/websocket"
 )
 
 type utf8Conn struct {
@@ -46,6 +49,58 @@ func NewServerConn(c net.Conn, mask byte) net.Conn {
 
 func (c *serverConn) Write(p []byte) (int, error) {
 	return c.w.Write(p)
+}
+
+type WsConnWrapper struct {
+	*websocket.Conn
+	r  io.Reader
+	wc io.WriteCloser
+}
+
+func (ws *WsConnWrapper) Read(p []byte) (int, error) {
+	if ws.r == nil {
+		var err error
+		_, ws.r, err = ws.Conn.NextReader()
+		if err != nil {
+			return 0, err
+		}
+	}
+	n, err := ws.r.Read(p)
+	if err == io.EOF {
+		ws.r = nil
+		err = nil
+	}
+	return n, err
+}
+
+func (ws *WsConnWrapper) Write(p []byte) (int, error) {
+	if ws.wc == nil {
+		var err error
+		ws.wc, err = ws.Conn.NextWriter(websocket.BinaryMessage)
+		if err != nil {
+			return 0, err
+		}
+	}
+	n, err := ws.wc.Write(p)
+	return n, err
+}
+
+func (ws *WsConnWrapper) Close() error {
+	if ws.wc == nil {
+		return nil
+	}
+	err := ws.wc.Close()
+	ws.wc = nil
+	return err
+}
+
+func (ws *WsConnWrapper) SetDeadline(t time.Time) error {
+	re := ws.SetReadDeadline(t)
+	we := ws.SetWriteDeadline(t)
+	if re != nil {
+		return re
+	}
+	return we
 }
 
 type clientConn struct {
