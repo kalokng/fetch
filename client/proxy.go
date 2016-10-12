@@ -408,9 +408,6 @@ func (p *NTLMProxy) Websocket(urlStr, protocol, origin string) (ws *websocket.Co
 		NetDial: func(network, addr string) (net.Conn, error) {
 			return p.dial(addr)
 		},
-		Proxy: func(*http.Request) (*url.URL, error) {
-			return p.proxyURL, nil
-		},
 		Subprotocols: protocols,
 	}
 
@@ -419,7 +416,7 @@ func (p *NTLMProxy) Websocket(urlStr, protocol, origin string) (ws *websocket.Co
 	// Create a websocket from connection
 	conn, resp, err := dialer.Dial(urlStr, h)
 	if err != nil {
-		fmt.Println("ERROR!", resp.StatusCode)
+		fmt.Println("ERROR!", err, resp)
 	}
 	return conn, err
 }
