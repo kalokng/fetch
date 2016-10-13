@@ -22,6 +22,7 @@ import (
 var proxyURL string
 var hostURL string
 var localPort string
+var useragent string
 
 func getRemoteProxy() string {
 	e := os.Getenv("REMOTE_PROXY")
@@ -35,6 +36,7 @@ func init() {
 	flag.StringVar(&localPort, "port", "8282", "the port this server going to listen")
 	flag.StringVar(&hostURL, "host", getRemoteProxy(), "Address of Remote server, $REMOTE_PROXY if set")
 	flag.StringVar(&proxyURL, "proxy", os.Getenv("HTTP_PROXY"), "Address of HTTP proxy server, $HTTP_PROXY if set")
+	flag.StringVar(&useragent, "agent", os.Getenv("AGENT"), "UserAgent of HTTP requests, $AGENT if set")
 }
 
 func main() {
@@ -76,7 +78,7 @@ func main() {
 	}
 
 	// handler to ask local proxy
-	proxy := createProxy(proxyURL)
+	proxy := createProxy(proxyURL, useragent)
 	proxyHandler := LogHandler("proxy  <--", proxy)
 
 	// handler to ask remote proxy
@@ -101,7 +103,7 @@ func main() {
 
 	// default handler, which is also a local proxy, but will validate the result.
 	// Whenever it finds the request is blocked, store the host to cache and fallback to remote
-	defProxy := createProxy(proxyURL)
+	defProxy := createProxy(proxyURL, useragent)
 	defProxy.Fallback = remoteProxy
 	defProxy.ValidHTTP = func(req *http.Request, resp *http.Response) error {
 		err := validHTTP(req, resp)
@@ -133,11 +135,12 @@ func main() {
 	}
 }
 
-func createProxy(proxyURL string) *NTLMProxy {
+func createProxy(proxyURL string, agent string) *NTLMProxy {
 	proxy, err := NewNTLMProxy(proxyURL)
 	if err != nil {
 		panic(err)
 	}
+	proxy.Agent = agent
 	return proxy
 }
 

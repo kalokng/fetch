@@ -31,6 +31,8 @@ type NTLMProxy struct {
 	transport *http.Transport
 	proxyURL  *url.URL
 
+	Agent string
+
 	ValidHTTP    func(req *http.Request, resp *http.Response) error
 	ValidConnect func(req *http.Request, c net.Conn) error
 	Fallback     http.Handler
@@ -117,7 +119,7 @@ func (p *NTLMProxy) dial(addr string) (net.Conn, error) {
 		Method: "CONNECT",
 		URL:    &url.URL{},
 		Host:   addr,
-		Header: make(http.Header),
+		Header: p.makeHeader(),
 	}
 
 	cb := ntlmPool.Get()
@@ -411,7 +413,7 @@ func (p *NTLMProxy) Websocket(urlStr, protocol, origin string) (ws *websocket.Co
 		Subprotocols: protocols,
 	}
 
-	h := make(http.Header)
+	h := p.makeHeader()
 	h.Add("Origin", strings.ToLower(origin))
 	// Create a websocket from connection
 	conn, resp, err := dialer.Dial(urlStr, h)
@@ -419,6 +421,14 @@ func (p *NTLMProxy) Websocket(urlStr, protocol, origin string) (ws *websocket.Co
 		fmt.Println("ERROR!", err, resp)
 	}
 	return conn, err
+}
+
+func (p *NTLMProxy) makeHeader() http.Header {
+	h := http.Header{}
+	if p.Agent != "" {
+		h.Set("User-Agent", p.Agent)
+	}
+	return h
 }
 
 // pushResponse writes the response to the ResponseWriter
