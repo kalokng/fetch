@@ -234,7 +234,7 @@ func (p *NTLMProxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 		// The connection is used by checking, we have to close it
 		if err != nil {
 			remote.Close()
-			log.Print("Failed to establish connection: " + err.Error())
+			log.Print("Failed to establish connection to " + r.Host + ": " + err.Error())
 			if p.Fallback == nil {
 				http.Error(w, "Failed to establish connection: "+err.Error(), http.StatusInternalServerError)
 			} else {
